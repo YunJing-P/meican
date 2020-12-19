@@ -1,10 +1,13 @@
+from typing import final
 import requests
 import datetime
 import logging
+import random
+import time
 
 logging.basicConfig(level = logging.CRITICAL,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 class Meican:
-    def __init__(self, username, password) -> None:
+    def __init__(self, username, password, filter_dict) -> None:
         self.base_url = 'https://meican.com/'
         self.base_params = {
             'client_id': 'Xqr8w0Uk4ciodqfPwjhav5rdxTaYepD',    # 看着是美餐固定的client信息
@@ -12,6 +15,17 @@ class Meican:
         }
         self.username = username
         self.password = password
+        self.filter_dict = filter_dict
+        if 6 == datetime.datetime.today().weekday():
+            self.start_date = (datetime.datetime.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            self.end_date = (datetime.datetime.today() + datetime.timedelta(days=8)).strftime("%Y-%m-%d")
+        else:
+            self.start_date = datetime.datetime.today().strftime("%Y-%m-%d")
+            sub_days = 6 - datetime.datetime.today().weekday()
+            self.end_date = (datetime.datetime.today() + datetime.timedelta(days=sub_days)).strftime("%Y-%m-%d")
+        if '' == self.filter_dict['start_date']: self.filter_dict['start_date'] = self.start_date
+        if '' == self.filter_dict['end_date']: self.filter_dict['end_date'] = self.end_date
+
 
     # 拼接url函数
     def build_url(self, part_url, ext_params) -> str:
@@ -24,6 +38,7 @@ class Meican:
         return self.base_url + part_url + '?' + '&'.join(kv_list)
 
     def post(self, url, data, headers=None) -> object:
+        time.sleep(self.filter_dict['delay_time'])
         if None == headers:headers = {'cookie': self.cookie}
         r = requests.post(url=url, headers=headers, data=data)
         if 200 == r.status_code:
@@ -33,6 +48,7 @@ class Meican:
             raise ValueError('POST请求响应码异常')
 
     def get(self, url, headers=None) -> object:
+        time.sleep(self.filter_dict['delay_time'])
         if None == headers:headers = {'cookie': self.cookie}
         r = requests.get(url=url, headers=headers)
         if 200 == r.status_code:
@@ -121,7 +137,7 @@ class Meican:
             logging.info('{}时间段餐厅列表为空'.format(targetTime))
         for i in response.json()['restaurantList']:
             restaurant_dict[i['name']] = i['uniqueId']
-        print(restaurant_dict)
+        return restaurant_dict
     # show_restaurants('67f3bce3-3758-4b88-834e-7dfdee5cbde5', '2020-12-19 15:30')
 
     # 查询餐厅菜牌
@@ -138,14 +154,14 @@ class Meican:
             'restaurantUniqueId': rest_id,
         }
         response = self.get(self.build_url(part_url, ext_params))
-        dish_dict = {}
-        n = 0
+        dish_dict = []
         for i in response.json()['dishList']:
             if i['isSection']:
                 continue
-            dish_dict[str(n)] = {'id': i['id'], 'name': i['name'], 'price': i['originalPriceInCent']/100}
-            n += 1
-        print(dish_dict)
+            if self.filter_dict['price_limt'] and i['originalPriceInCent']/100 > self.filter_dict['price']:
+                continue
+            dish_dict.append({'id': i['id'], 'name': i['name'], 'price': i['originalPriceInCent']/100})
+        return dish_dict
     # show_dishes('67f3bce3-3758-4b88-834e-7dfdee5cbde5', '2020-12-19 15:30', '30a1c2')
 
     # 获取地址
@@ -158,15 +174,16 @@ class Meican:
             'namespace': namespace
         }
         response = self.get(self.build_url(part_url, ext_params))
-        print(response.json()['addressList'])
+        return response.json()['addressList']
     # get_address('452451')
 
     # 提交订单
-    def add_order(self, tabUniqueId, AddressUniqueId, targetTime):
+    def add_order(self, tabUniqueId, AddressUniqueId, targetTime, dishId):
         '''
             tabUniqueId: 点餐段唯一值，show_ordered()里返回
             AddressUniqueId: 地址唯一值，get_address()里返回
             targetTime: 点餐段时间值，show_ordered()里返回
+            dishId: 菜品id，show_dishes()里返回
         '''
         part_url = 'preorder/api/v2.1/orders/add'
         headers = {
@@ -176,13 +193,47 @@ class Meican:
         arg_dict = {
             'corpAddressRemark': '',
             'corpAddressUniqueId': AddressUniqueId,
-            'order': '[{"count":1,"dishId":159542297}]',
-            'remarks': '[{"dishId":"159542297","remark":""}]',
+            'order': '[{{"count":1,"dishId":{}}}]'.format(str(dishId)),
+            'remarks': '[{{"dishId":"{0}","remark":""}}]'.format(str(dishId)),
             'tabUniqueId': tabUniqueId,
             'targetTime': targetTime,
             'userAddressUniqueId': AddressUniqueId
         }
+        # TODO: 现在只输出，没有真正提交
+        print(arg_dict)
+        return 
         response = self.post(self.build_url(part_url, {}), arg_dict, headers=headers)
         print(response.json())
 
+    # 批量下单
+    def radom_add(self):
+        self.set_cookie()
+        all_address = []
+        ordered_dict = self.show_ordered(self.start_date, self.end_date)
+        for date, date_items in ordered_dict.items():
+            # 过滤掉非工作日
+            if datetime.datetime.strptime(date, "%Y-%m-%d").weekday() in self.filter_dict['work_days']:
+                for time_part, dish_part in date_items.items():
+                    # 过滤掉已点餐日期
+                    # if 'None' != dish_part['dish']:
+                    #     continue
+                    restaurants = self.show_restaurants(dish_part['tabUniqueId'], dish_part['target_time'])
+                    all_dish = []
+                    for restaurant, rest_id in restaurants.items():
+                        all_dish += self.show_dishes(dish_part['tabUniqueId'], dish_part['target_time'], rest_id)
+                    print(date,time_part)
+                    address_list = self.get_address(dish_part['namespace'])
+                    address_dict = {}
+                    for address_item in address_list:
+                        all_address.append(address_item['address'])
+                        address_dict[address_item['address']] = address_item['uniqueId']
+                    
+                    final_addressId = ''
+                    for address in address_dict.keys():
+                        if address == self.filter_dict['address']:
+                            final_addressId = address_dict[address]
+                    # TODO: 默认地址匹配不上时，给用户选择
+                    selected = random.sample(all_dish, 1)
+                    self.add_order(dish_part['tabUniqueId'], final_addressId, dish_part['target_time'], selected[0]['id'])
+        
 

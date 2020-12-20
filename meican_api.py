@@ -1,11 +1,10 @@
-from typing import final
 import requests
 import datetime
 import logging
 import random
 import time
 
-logging.basicConfig(level = logging.CRITICAL,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level = logging.INFO, format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 class Meican:
     def __init__(self, username, password, filter_dict) -> None:
         self.base_url = 'https://meican.com/'
@@ -18,7 +17,7 @@ class Meican:
         self.filter_dict = filter_dict
         if 6 == datetime.datetime.today().weekday():
             self.start_date = (datetime.datetime.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-            self.end_date = (datetime.datetime.today() + datetime.timedelta(days=8)).strftime("%Y-%m-%d")
+            self.end_date = (datetime.datetime.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         else:
             self.start_date = datetime.datetime.today().strftime("%Y-%m-%d")
             sub_days = 6 - datetime.datetime.today().weekday()
@@ -44,7 +43,7 @@ class Meican:
         if 200 == r.status_code:
             return r
         else:
-            logging.critical('POST请求响应码异常，url：{}，data：{}，header：{}'.format(url, data, headers))
+            logging.critical('POST请求响应码异常，back:{}，url：{}，data：{}，header：{}'.format(r.text, url, data, headers))
             raise ValueError('POST请求响应码异常')
 
     def get(self, url, headers=None) -> object:
@@ -54,7 +53,7 @@ class Meican:
         if 200 == r.status_code:
             return r
         else:
-            logging.critical('GET请求响应码异常，url：{}，header：{}'.format(url, headers))
+            logging.critical('GET请求响应码异常，back:{}，url：{}，header：{}'.format(r.text, url, headers))
             raise ValueError('GET请求响应码异常')
 
     def set_cookie(self) -> None:
@@ -209,19 +208,18 @@ class Meican:
     def radom_add(self):
         self.set_cookie()
         all_address = []
-        ordered_dict = self.show_ordered(self.start_date, self.end_date)
+        ordered_dict = self.show_ordered(self.filter_dict['start_date'], self.filter_dict['end_date'])
         for date, date_items in ordered_dict.items():
             # 过滤掉非工作日
             if datetime.datetime.strptime(date, "%Y-%m-%d").weekday() in self.filter_dict['work_days']:
                 for time_part, dish_part in date_items.items():
                     # 过滤掉已点餐日期
-                    # if 'None' != dish_part['dish']:
-                    #     continue
+                    if 'None' != dish_part['dish']:
+                        continue
                     restaurants = self.show_restaurants(dish_part['tabUniqueId'], dish_part['target_time'])
                     all_dish = []
                     for restaurant, rest_id in restaurants.items():
                         all_dish += self.show_dishes(dish_part['tabUniqueId'], dish_part['target_time'], rest_id)
-                    print(date,time_part)
                     address_list = self.get_address(dish_part['namespace'])
                     address_dict = {}
                     for address_item in address_list:
@@ -234,6 +232,7 @@ class Meican:
                             final_addressId = address_dict[address]
                     # TODO: 默认地址匹配不上时，给用户选择
                     selected = random.sample(all_dish, 1)
+                    logging.info('{}-{}-{}'.format(date, time_part, selected[0]['name']))
                     self.add_order(dish_part['tabUniqueId'], final_addressId, dish_part['target_time'], selected[0]['id'])
         
 

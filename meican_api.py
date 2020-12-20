@@ -198,11 +198,9 @@ class Meican:
             'targetTime': targetTime,
             'userAddressUniqueId': AddressUniqueId
         }
-        # TODO: 现在只输出，没有真正提交
-        print(arg_dict)
-        return 
         response = self.post(self.build_url(part_url, {}), arg_dict, headers=headers)
-        print(response.json())
+        logging.info(response.json())
+        return
 
     # 批量下单
     def radom_add(self):
